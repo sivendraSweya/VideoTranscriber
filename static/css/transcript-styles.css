@@ -1,0 +1,74 @@
+/* Enhanced Transcript Styles */
+.transcript-content {
+    font-family: 'Inter', sans-serif;
+    line-height: 1.7;
+    color: var(--text-color-light);
+    font-size: 1.05rem;
+    padding: 10px 0;
+}
+
+body.dark-mode .transcript-content {
+    color: var(--text-color-dark);
+}
+
+.transcript-content p {
+    margin-bottom: 16px;
+    text-align: justify;
+    padding: 0 5px;
+}
+
+.highlight {
+    background: linear-gradient(transparent 60%, rgba(79, 140, 255, 0.2) 40%);
+    font-weight: 500;
+    padding: 0 2px;
+}
+
+body.dark-mode .highlight {
+    background: linear-gradient(transparent 60%, rgba(79, 140, 255, 0.3) 40%);
+}
+
+.key-points-section {
+    background-color: rgba(79, 140, 255, 0.1);
+    border-radius: 12px;
+    padding: 15px 20px;
+    margin-bottom: 25px;
+    border-left: 4px solid #4f8cff;
+}
+
+body.dark-mode .key-points-section {
+    background-color: rgba(79, 140, 255, 0.15);
+}
+
+.key-points-section h3 {
+    color: #4f8cff;
+    margin-top: 0;
+    margin-bottom: 10px;
+    font-size: 1.2rem;
+    font-weight: 600;
+}
+
+.key-points-section ul {
+    margin: 0;
+    padding-left: 20px;
+}
+
+.key-points-section li {
+    margin-bottom: 8px;
+    line-height: 1.5;
+    color: var(--text-color-light);
+}
+
+body.dark-mode .key-points-section li {
+    color: var(--text-color-dark);
+}
+
+/* Transcript display in response cards */
+.response-card pre.qa-answer {
+    white-space: normal;
+}
+
+.response-card .qa-answer .transcript-content {
+    max-height: 400px;
+    overflow-y: auto;
+    padding-right: 10px;
+}

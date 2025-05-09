@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Ask a question</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/transcript-styles.css') }}">
+  <style>
+    .back-btn {
+      position: absolute;
+      left: 32px;
+      top: 20px;
+      color: #0074d9;
+      background: #eaf6ff;
+      border-radius: 8px;
+      padding: 8px 18px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 1rem;
+      transition: background 0.2s, color 0.2s;
+      z-index: 10;
+    }
+    .back-btn:hover {
+      background: #0074d9;
+      color: #fff;
+    }
+    .step-indicator {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+    .step {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: #eaf6ff;
+      color: #0074d9;
+      font-weight: bold;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 7px;
+      font-size: 1.1rem;
+    }
+    .step.active {
+      background: #0074d9;
+      color: #fff;
+    }
+    .animated.fade-in {
+      animation: fadeInCard 0.8s cubic-bezier(.4,1.7,.6,1) 1;
+    }
+    @keyframes fadeInCard {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .show-toast {
+      animation: fadeInToast 0.5s;
+    }
+    @keyframes fadeInToast {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .suggestion-bar {
+      margin-top: 20px;
+      font-weight: bold;
+    }
+    .smart-suggestions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .suggestion-btn {
+      background: #eaf6ff;
+      border: 1px solid #0074d9;
+      border-radius: 8px;
+      padding: 8px 14px;
+      color: #0074d9;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .suggestion-btn:hover {
+      background: #0074d9;
+      color: #fff;
+    }
+    .brand-header {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 20px;
+    }
+    .logo {
+      font-size: 1.5rem;
+      font-weight: bold;
+      margin-right: 10px;
+    }
+    .product-name {
+      font-size: 1.2rem;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <a href="/" class="back-btn">&#8592; Back</a>
+  <div class="chat-container">
+    <div class="theme-toggle" id="themeToggle">
+      <div class="theme-toggle-switch" id="themeSwitch">🌞</div>
+    </div>
+    <div class="brand-header">
+      <div class="logo">Sweya.AI</div>
+      <div class="product-name" id="typewriter"></div>
+    </div>
+    <script>
+      // Typewriter effect for the product name
+      const typewriterElement = document.getElementById('typewriter');
+      const text = 'Townhall | Video Transcriber';
+      let i = 0;
+      let isDeleting = false;
+      let currentText = '';
+      
+      function typeWriter() {
+          if (i < text.length && !isDeleting) {
+              currentText += text.charAt(i);
+              typewriterElement.innerHTML = currentText + '<span class="cursor">|</span>';
+              i++;
+              setTimeout(typeWriter, Math.random() * 100 + 50);
+          } else if (i >= text.length && !isDeleting) {
+              // Pause at the end before deleting
+              isDeleting = true;
+              setTimeout(typeWriter, 2000);
+          } else if (isDeleting && currentText.length > 0) {
+              // Delete text
+              currentText = currentText.slice(0, -1);
+              typewriterElement.innerHTML = currentText + '<span class="cursor">|</span>';
+              setTimeout(typeWriter, Math.random() * 50 + 30);
+          } else {
+              // Reset and start again
+              isDeleting = false;
+              i = 0;
+              setTimeout(typeWriter, 500);
+          }
+      }
+      
+      // Start the typewriter effect
+      setTimeout(typeWriter, 1000);
+    </script>
+    <div class="step-indicator">
+      <span class="step">1</span>
+      <span class="step">2</span>
+      <span class="step active">3</span>
+    </div>
+    <h1 class="chat-title">Ask a question about the video</h1>
+
+    <div class="suggestion-bar">
+      <b>Suggestions:</b>
+      <span class="suggestion" onclick="setSuggestion('What is the main topic of the video?')">Main topic</span> |
+      <span class="suggestion" onclick="setSuggestion('Who are the participants?')">Participants</span>
+      ...
+    </div>
+
+    <div id="dynamic-suggestions" class="smart-suggestions"></div>
+
+    <div class="input-row">
+      <input type="text" id="question" placeholder="Type your question..." maxlength="200" autocomplete="off">
+      <button class="send-btn" onclick="sendQuestion()">Send</button>
+    </div>
+
+    <div id="loading" class="loading-spinner" style="display:none;"></div>
+    <div id="toast" class="toast"></div>
+
+    <div class="response-card animated" id="response-card" style="display:none;">
+      <div class="qa-label">Response</div>
+      <div id="response-question" class="qa-question"></div>
+      <div id="response-answer" class="qa-answer"></div>
+    </div>
+  </div>
+
+  <script>
+    // Theme toggle functionality
+    const themeToggle = document.getElementById('themeToggle');
+    const themeSwitch = document.getElementById('themeSwitch');
+    
+    // Check for saved theme preference or use preferred color scheme
+    const savedTheme = localStorage.getItem('theme');
+    if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+      document.body.classList.add('dark-mode');
+      themeSwitch.innerHTML = '🌙';
+    }
+    
+    // Toggle theme on click
+    themeToggle.addEventListener('click', () => {
+      document.body.classList.toggle('dark-mode');
+      
+      // Update the icon and save preference
+      if (document.body.classList.contains('dark-mode')) {
+        themeSwitch.innerHTML = '🌙';
+        localStorage.setItem('theme', 'dark');
+      } else {
+        themeSwitch.innerHTML = '🌞';
+        localStorage.setItem('theme', 'light');
+      }
+    });
+    
+    // Auto-focus the question input
+    document.addEventListener('DOMContentLoaded', function() {
+      document.getElementById('question').focus();
+    });
+
+    function setSuggestion(text) {
+      document.getElementById('question').value = text;
+      document.getElementById('question').focus();
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.innerText = msg;
+      toast.classList.add('show-toast');
+      toast.style.display = 'block';
+      setTimeout(() => {
+        toast.classList.remove('show-toast');
+        toast.style.display = 'none';
+      }, 2500);
+    }
+
+    function showLoading(show) {
+      document.getElementById('loading').style.display = show ? 'block' : 'none';
+    }
+
+    function sendQuestion(customText = null) {
+      const user_input = customText || document.getElementById('question').value.trim();
+      if (!user_input) {
+        showToast('Please enter a question.');
+        return;
+      }
+      showLoading(true);
+      document.getElementById('response-card').style.display = 'none';
+
+      fetch('/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_input })
+      })
+      .then(response => response.json())
+      .then(data => {
+        showLoading(false);
+        document.getElementById('response-question').innerText = 'Q: ' + user_input;
+        document.getElementById('response-answer').innerHTML = data.response.replace(/\n/g, "<br>");
+        const card = document.getElementById('response-card');
+        card.style.display = 'block';
+        card.classList.remove('fade-in');
+        void card.offsetWidth;
+        card.classList.add('fade-in');
+      })
+      .catch(err => {
+        showLoading(false);
+        showToast('Error: Unable to get response.');
+        console.error(err);
+      });
+    }
+
+    // Call this after transcription to get auto-suggestions
+    function fetchAutoSuggestions() {
+      fetch('/chat?suggestions=true')
+        .then(res => res.json())
+        .then(data => {
+          if (data && Array.isArray(data.suggestions)) {
+            showSuggestions(data.suggestions);
+          }
+        });
+    }
+
+    function showSuggestions(suggestions) {
+      const container = document.getElementById('dynamic-suggestions');
+      container.innerHTML = '';
+      suggestions.forEach(text => {
+        const btn = document.createElement('button');
+        btn.className = 'suggestion-btn';
+        btn.innerText = text;
+        btn.onclick = () => sendQuestion(text);
+        container.appendChild(btn);
+      });
+    }
+
+    // OPTIONAL: Automatically trigger suggestions on page load
+    fetchAutoSuggestions();
+  </script>
+</body>
+</html>

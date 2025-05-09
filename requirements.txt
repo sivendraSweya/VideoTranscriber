@@ -1,0 +1,6 @@
+Flask==2.3.2
+requests
+openai-whisper
+werkzeug
+ffmpeg-python
+nltk

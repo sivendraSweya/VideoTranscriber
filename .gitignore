@@ -1,0 +1,23 @@
+# Python-specific ignores
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+whisper-env/
+whisper_env/
+venv/
+env/
+
+# Uploaded files and temporary files
+uploads/
+*.log
+
+# IDE-specific files
+.vscode/
+.idea/
+
+# Miscellaneous
+.DS_Store
+*.swp
+*.swo
