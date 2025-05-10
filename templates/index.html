@@ -457,14 +457,75 @@
             toast.classList.add('show');
             setTimeout(() => { toast.classList.remove('show'); }, 2500);
         }
+        
+        // Upload validation
+        function submitChat() {
+            const userInput = document.getElementById('userInput').value;
+            const answerContainer = document.getElementById('answerContainer');
+            const submitButton = document.getElementById('submitButton');
+
+            // Disable submit button and show loading
+            submitButton.disabled = true;
+            answerContainer.innerHTML = '<div class="loading">Generating response...</div>';
+
+            fetch('/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ user_input: userInput })
+            })
+            .then(response => {
+                // Check if response is OK (status in 200-299 range)
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Handle different possible response formats
+                if (data.response) {
+                    answerContainer.innerHTML = data.response;
+                } else if (data.error) {
+                    answerContainer.innerHTML = `Error: ${data.error}`;
+                    console.error('Server Error:', data.error);
+                } else {
+                    answerContainer.innerHTML = 'Unexpected response format';
+                }
+                document.getElementById('userInput').value = '';
+            })
+            .catch(error => {
+                console.error('Fetch Error:', error);
+                answerContainer.innerHTML = 'An error occurred. Please check your connection and try again.';
+            })
+            .finally(() => {
+                // Re-enable submit button
+                submitButton.disabled = false;
+            });
+        }
     </script>
     <style>
         .step-indicator {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
             display: flex;
-            justify-content: center;
-            align-items: center;
-            margin-bottom: 22px;
+            gap: 10px;
         }
+
+        .loading {
+            text-align: center;
+            color: #666;
+            font-style: italic;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
         .step {
             width: 28px;
             height: 28px;

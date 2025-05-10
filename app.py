@@ -174,7 +174,7 @@ def diagnose_lm_studio_connection():
         "http://localhost:1234/v1/chat/completions",
         "http://localhost:1234/chat",
         "http://127.0.0.1:1234",
-        "http://192.168.0.101:1234"
+        "http://192.168.1.12:1234"
     ]
     for url in test_urls:
         try:
@@ -199,6 +199,15 @@ UPLOAD_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 model = whisper.load_model("base")
+
+# Configure logging
+import logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s: %(message)s')
+
+# Favicon handler
+@app.route('/favicon.ico')
+def favicon():
+    return app.send_static_file('favicon.ico')
 
 
 @app.route("/")
@@ -253,7 +262,14 @@ def chat():
         return jsonify(diagnostics)
 
     if request.method == 'POST':
+        # Validate JSON input
+        if not request.is_json:
+            return jsonify({"error": "Request must be JSON"}), 400
+
         user_question = request.json.get('user_input', '')
+        if not user_question:
+            return jsonify({"error": "User input is required"}), 400
+
         # Use the raw transcript for question answering to avoid HTML formatting issues
         transcript = session.get("raw_transcript", session.get("transcript", ''))
         
@@ -275,13 +291,13 @@ Make your answer concise and highlight any important information or numbers.
 
         print(f"Received prompt: {user_question}", file=sys.stderr)
 
-        lmstudio_url = "http://192.168.0.101:1234/v1/completions"
+        lmstudio_url = "http://192.168.1.12:1234/v1/completions"
         headers = {"Content-Type": "application/json"}
 
         payload = {
             "model": "meta-llama-3.1-8b-instruct",
             "prompt": prompt,
-            "max_tokens": 512,
+            "max_tokens": 1024,
             "temperature": 0.7
         }
 
@@ -289,7 +305,7 @@ Make your answer concise and highlight any important information or numbers.
             print(f"Attempting to connect to: {lmstudio_url}", file=sys.stderr)
             print(f"Payload: {json.dumps(payload)}", file=sys.stderr)
 
-            response = requests.post(lmstudio_url, json=payload, headers=headers, timeout=50)
+            response = requests.post(lmstudio_url, json=payload, headers=headers, timeout=100)
             print(f"Response Status: {response.status_code}", file=sys.stderr)
             print(f"Response Headers: {response.headers}", file=sys.stderr)
             print(f"Response Text: {response.text[:500]}", file=sys.stderr)
@@ -303,20 +319,20 @@ Make your answer concise and highlight any important information or numbers.
                     return jsonify({"response": answer})
                 except json.JSONDecodeError as je:
                     print(f"JSON Decode Error: {je}", file=sys.stderr)
-                    return jsonify({"response": f"[JSON Parsing Error] {str(je)}"})
+                    return jsonify({"error": "JSON parsing failed", "details": str(je)}), 500
 
             else:
-                return jsonify({"response": f"[LM Studio Error] {response.status_code}: {response.text[:200]}"})
+                return jsonify({"error": f"LM Studio Error {response.status_code}", "details": response.text[:200]}), response.status_code
 
         except requests.ConnectionError as ce:
             print(f"Connection Error: {ce}", file=sys.stderr)
-            return jsonify({"response": f"[Connection Error] Unable to reach LM Studio server. Check server status."})
+            return jsonify({"error": "Connection failed", "details": str(ce)}), 500
         except requests.Timeout as te:
             print(f"Connection Timeout: {te}", file=sys.stderr)
-            return jsonify({"response": f"[Timeout Error] LM Studio server took too long to respond."})
+            return jsonify({"error": "Request timed out", "details": str(te)}), 504
         except requests.RequestException as e:
             print(f"Request Exception: {e}", file=sys.stderr)
-            return jsonify({"response": f"[Request Exception] {str(e)}"})
+            return jsonify({"error": "Request failed", "details": str(e)}), 500
 
     return render_template("chat.html")
 
