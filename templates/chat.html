@@ -540,9 +540,25 @@
     }
 
     // Search functionality
+    function formatTimestamp(seconds) {
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      const secs = Math.floor(seconds % 60);
+      if (hours > 0) {
+        return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+      }
+      return `${minutes}:${secs.toString().padStart(2, '0')}`;
+    }
+
     function searchTranscript() {
-      const searchInput = document.getElementById('searchInput').value.toLowerCase();
-      if (!searchInput) return;
+      const searchInput = document.getElementById('searchInput').value.trim();
+      if (!searchInput) {
+        showToast('Please enter a search term');
+        return;
+      }
+
+      const resultsContainer = document.getElementById('searchResults');
+      resultsContainer.innerHTML = '<div class="loading">Searching...</div>';
 
       fetch('/search_transcript', {
         method: 'POST',
@@ -551,29 +567,42 @@
         },
         body: JSON.stringify({ query: searchInput })
       })
-      .then(response => response.json())
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+      })
       .then(data => {
-        const resultsContainer = document.getElementById('searchResults');
+        if (data.error) {
+          throw new Error(data.error);
+        }
+
         if (data.results && data.results.length > 0) {
           resultsContainer.innerHTML = data.results.map(result => {
-            const timestamp = new Date(result.timestamp * 1000).toISOString().substr(11, 8);
-            const highlightedText = result.text.replace(
-              new RegExp(searchInput, 'gi'),
-              match => `<span class="highlight">${match}</span>`
-            );
+            // Highlight all words from the search query
+            let highlightedText = result.text;
+            searchInput.toLowerCase().split(' ').forEach(word => {
+              if (word) {
+                const regex = new RegExp(`(${word})`, 'gi');
+                highlightedText = highlightedText.replace(regex, '<span class="highlight">$1</span>');
+              }
+            });
+
             return `
               <div class="search-result" onclick="navigateToTimestamp(${result.timestamp})">
-                <span class="timestamp">${timestamp}</span>
+                <span class="timestamp">${formatTimestamp(result.timestamp)}</span>
                 <span class="text">${highlightedText}</span>
               </div>
             `;
           }).join('');
         } else {
-          resultsContainer.innerHTML = '<p>No results found</p>';
+          resultsContainer.innerHTML = '<p class="no-results">No results found</p>';
         }
       })
       .catch(error => {
         console.error('Error:', error);
+        resultsContainer.innerHTML = `<p class="error">Error: ${error.message}</p>`;
         showToast('Error searching transcript');
       });
     }

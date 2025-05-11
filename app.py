@@ -1074,15 +1074,40 @@ def search_transcript_segments(query: str, segments: List[Dict]) -> List[Dict]:
     results = []
     query = query.lower()
     
+    # Split query into words for better matching
+    query_words = query.split()
+    
     for segment in segments:
         text = segment.get('text', '').lower()
-        if query in text:
+        timestamp = segment.get('start', 0)
+        
+        # Convert timestamp to seconds if it's in HH:MM:SS format
+        if isinstance(timestamp, str):
+            try:
+                parts = timestamp.split(':')
+                if len(parts) == 3:
+                    h, m, s = map(int, parts)
+                    timestamp = h * 3600 + m * 60 + s
+                elif len(parts) == 2:
+                    m, s = map(int, parts)
+                    timestamp = m * 60 + s
+            except:
+                timestamp = 0
+        
+        # Check if all query words are in the text
+        if all(word in text for word in query_words):
+            # Calculate relevance score based on word proximity
+            score = sum(text.count(word) for word in query_words)
+            
             results.append({
                 'text': segment['text'],
-                'timestamp': segment['start']
+                'timestamp': timestamp,
+                'score': score
             })
     
-    return results[:10]  # Limit to top 10 results
+    # Sort by relevance score and limit to top 10
+    results.sort(key=lambda x: x['score'], reverse=True)
+    return results[:10]
 
 @app.route('/search_transcript', methods=['POST'])
 def search_transcript():
@@ -1093,10 +1118,20 @@ def search_transcript():
     if not query:
         return jsonify({'error': 'Query is required'}), 400
     
+    # Check if we have a transcript in the session
+    transcript = session.get('transcript')
+    if not transcript:
+        return jsonify({'error': 'No transcript available. Please transcribe a video first.'}), 404
+    
+    # Get segments from session
     segments = session.get('timestamps', [])
     if not segments:
-        return jsonify({'error': 'No transcript available'}), 404
-
+        # If no segments but we have transcript, create a single segment
+        segments = [{
+            'text': transcript,
+            'start': 0
+        }]
+    
     results = search_transcript_segments(query, segments)
     return jsonify({'results': results})
 
