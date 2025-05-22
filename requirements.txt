@@ -3,9 +3,3 @@ requests
 openai-whisper
 werkzeug
 ffmpeg-python
-nltk
-reportlab>=4.0.4
-Pillow>=9.0.0
-qrcode>=8.0.0
-pytube
-opencv-python>=15.0.0
