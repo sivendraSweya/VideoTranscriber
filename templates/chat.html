@@ -35,6 +35,23 @@
         <div class="input-row">
             <input type="text" id="question" placeholder="Type your question..." maxlength="200" autocomplete="off">
             <button class="send-btn" onclick="sendQuestion()">Send</button>
+            <button class="pdf-btn" onclick="generatePDF()" title="Download Transcript as PDF">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                    <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+                    <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
+                </svg>
+                PDF
+            </button>
+        </div>
+        <div id="pdf-title-modal" class="modal">
+            <div class="modal-content">
+                <h3>Enter Document Title</h3>
+                <input type="text" id="pdf-title" placeholder="Enter title for the PDF" value="Meeting Transcript">
+                <div class="modal-buttons">
+                    <button onclick="document.getElementById('pdf-title-modal').style.display='none'">Cancel</button>
+                    <button onclick="confirmPDF()" class="primary">Generate PDF</button>
+                </div>
+            </div>
         </div>
         <div id="loading" class="loading-spinner" style="display:none;"></div>
         <div id="toast" class="toast"></div>
@@ -45,6 +62,116 @@
         </div>
     </div>
     <script>
+        function generatePDF() {
+            document.getElementById('pdf-title-modal').style.display = 'flex';
+        }
+
+        function confirmPDF() {
+            const title = document.getElementById('pdf-title').value.trim() || 'Meeting Transcript';
+            document.getElementById('pdf-title-modal').style.display = 'none';
+            
+            // Show loading state
+            const originalText = document.querySelector('.pdf-btn').innerHTML;
+            const pdfBtn = document.querySelector('.pdf-btn');
+            const toast = document.getElementById('toast');
+            
+            pdfBtn.disabled = true;
+            pdfBtn.innerHTML = '<div class="spinner"></div> Generating...';
+            
+            // Create form and submit using fetch API for better error handling
+            const formData = new FormData();
+            formData.append('title', title);
+            
+            console.log('Starting PDF generation with title:', title);
+            
+            let responseClone;  // Store response for later use
+            
+            fetch('/generate_pdf', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'Accept': 'application/json, application/pdf'
+                }
+            })
+            .then(response => {
+                console.log('Response status:', response.status);
+                responseClone = response.clone();  // Clone the response for later use
+                
+                // Check if response is JSON (error) or PDF (success)
+                const contentType = response.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    return response.json().then(err => {
+                        // Handle JSON error response
+                        console.error('Server error:', err);
+                        throw new Error(err.details || 'Failed to generate PDF. Please try again.');
+                    });
+                }
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                return response.blob();
+            })
+            .then(blob => {
+                if (!blob) {
+                    throw new Error('Received empty response from server');
+                }
+                
+                console.log('PDF blob received, size:', blob.size, 'bytes');
+                
+                // Create a download link and trigger it
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                
+                // Try to get filename from content-disposition header
+                const contentDisposition = responseClone.headers.get('content-disposition');
+                let filename = `transcript_${new Date().toISOString().slice(0, 10)}.pdf`;
+                
+                if (contentDisposition) {
+                    const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+                    if (filenameMatch != null && filenameMatch[1]) { 
+                        filename = filenameMatch[1].replace(/['"]/g, '');
+                    }
+                }
+                
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                
+                // Clean up
+                setTimeout(() => {
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                }, 100);
+                
+                // Show success message
+                showToast('PDF generated successfully!');
+            })
+            .catch(error => {
+                console.error('Error generating PDF:', error);
+                let errorMessage = 'Error generating PDF. ';
+                
+                if (error.message) {
+                    errorMessage += error.message;
+                } else if (error.statusText) {
+                    errorMessage += error.statusText;
+                }
+                
+                // Show error in toast
+                showToast(errorMessage);
+                
+                // Also log to console for debugging
+                console.error('Full error:', error);
+            })
+            .finally(() => {
+                // Reset button state
+                pdfBtn.disabled = false;
+                pdfBtn.innerHTML = originalText;
+            });
+        }
+
         function setSuggestion(text) {
             document.getElementById('question').value = text;
             document.getElementById('question').focus();
@@ -92,11 +219,131 @@
                 showToast('Error: Unable to get response. Check server connection.');
             });
         }
+        function downloadPDF() {
+            const question = document.getElementById('response-question').innerText;
+            const answer = document.getElementById('response-answer').innerText;
+            const pdfContent = `
+                <h1>Chat Transcript</h1>
+                <h2>Question</h2>
+                <p>${question}</p>
+                <h2>Answer</h2>
+                <p>${answer}</p>
+            `;
+            const pdf = new jsPDF();
+            pdf.fromHTML(pdfContent);
+            pdf.save('chat_transcript.pdf');
+        }
         document.getElementById('question').addEventListener('keydown', function(e) {
             if (e.key === 'Enter') sendQuestion();
         });
     </script>
     <style>
+        .input-row {
+            display: flex;
+            gap: 10px;
+            margin: 20px 0;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        
+        .pdf-btn {
+            background-color: #e74c3c;
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: background-color 0.2s;
+            font-size: 14px;
+        }
+        
+        .pdf-btn:hover {
+            background-color: #c0392b;
+        }
+        
+        .pdf-btn:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+        
+        .spinner {
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 2px solid white;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        
+        .modal-content {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 400px;
+        }
+        
+        .modal h3 {
+            margin-top: 0;
+            color: #2c3e50;
+        }
+        
+        .modal input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        
+        .modal-buttons {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        .modal-buttons button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .modal-buttons button.primary {
+            background-color: #3498db;
+            color: white;
+        }
+        
+        .modal-buttons button.primary:hover {
+            background-color: #2980b9;
+        }
+        .input-row > * {
+            margin: 5px 0;
+        }
         .back-btn {
             position: absolute;
             left: 32px;

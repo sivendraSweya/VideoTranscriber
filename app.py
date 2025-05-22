@@ -1,10 +1,14 @@
-from flask import Flask, render_template, request, session, redirect, url_for, jsonify
+from flask import Flask, render_template, request, session, redirect, url_for, jsonify, send_from_directory
+import re
 from werkzeug.utils import secure_filename
 import os
 import whisper
 import requests
 import json
 import socket
+import tempfile
+from datetime import datetime
+from transcript_to_pdf import create_pdf
 
 
 def diagnose_lm_studio_connection():
@@ -114,6 +118,98 @@ def transcribe():
         return f"Error during transcription: {str(e)}", 500
 
 
+@app.route("/generate_pdf", methods=["POST"])
+def generate_pdf():
+    """Generate a PDF from the transcript in the session with content analysis."""
+    print("\n=== Starting PDF Generation ===")
+    
+    if 'transcript' not in session or not session['transcript']:
+        error_msg = "No transcript available to generate PDF"
+        print(f"Error: {error_msg}")
+        return jsonify({"error": error_msg}), 400
+    
+    temp_path = None
+    try:
+        # Create a temporary file for the PDF
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+            temp_path = temp_file.name
+        print(f"Temporary PDF file created at: {temp_path}")
+        
+        # Get custom title or use default
+        custom_title = request.form.get('title', 'Meeting Transcript')
+        print(f"Using title: {custom_title}")
+        
+        # Print transcript preview for debugging
+        transcript_preview = session['transcript'][:100] + '...' if len(session['transcript']) > 100 else session['transcript']
+        print(f"Transcript preview: {transcript_preview}")
+        
+        # Ensure transcript is a string
+        transcript_text = str(session['transcript'])
+        
+        # Generate the PDF with content analysis
+        print("Starting PDF generation...")
+        output_path = create_pdf(
+            transcript_text=transcript_text,
+            output_filename=temp_path,
+            title=custom_title,
+            analyze_content=True  # Enable content analysis
+        )
+        print(f"PDF generated at: {output_path}")
+        
+        # Verify the file was created
+        if not os.path.exists(output_path):
+            raise FileNotFoundError(f"PDF file was not created at {output_path}")
+        
+        # Read the generated PDF
+        with open(output_path, 'rb') as f:
+            pdf_data = f.read()
+        
+        if not pdf_data:
+            raise ValueError("Generated PDF is empty")
+            
+        print(f"PDF size: {len(pdf_data)} bytes")
+        
+        # Clean up the temporary file
+        try:
+            os.unlink(output_path)
+            print("Temporary PDF file cleaned up")
+        except Exception as e:
+            print(f"Warning: Could not delete temporary file: {str(e)}")
+        
+        # Create response with PDF data
+        from flask import make_response
+        response = make_response(pdf_data)
+        response.headers['Content-Type'] = 'application/pdf'
+        safe_title = re.sub(r'[^\w\s-]', '', custom_title).strip().replace(' ', '_')
+        filename = f"{safe_title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        
+        print("PDF generation completed successfully!")
+        return response
+        
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        error_msg = f"Error generating PDF: {str(e)}"
+        print("\n=== ERROR DETAILS ===")
+        print(error_msg)
+        print("\nStack Trace:")
+        print(error_details)
+        print("====================\n")
+        
+        # Clean up the temporary file if it exists
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+                print("Cleaned up temporary file after error")
+            except Exception as cleanup_error:
+                print(f"Error cleaning up temp file: {str(cleanup_error)}")
+        
+        return jsonify({
+            "error": "Failed to generate PDF. Please check the server logs for details.",
+            "details": str(e)
+        }), 500
+
 @app.route("/chat", methods=["GET", "POST"])
 def chat():
     if request.args.get('diagnose') == 'true':
@@ -126,8 +222,7 @@ def chat():
             return jsonify({"response": "No prompt provided."})
 
         import sys
-
-        print(f"Received prompt: {prompt}", file=sys.stderr)  # 👈 PLACE IT HERE
+        print(f"Received prompt: {prompt}", file=sys.stderr)
 
         lmstudio_url = "http://192.168.0.101:1234/v1/completions"
         headers = {"Content-Type": "application/json"}
