@@ -1,0 +1,500 @@
+{% extends "base.html" %}
+
+{% block content %}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="flash-messages">
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">
+                        <i class="fas {% if category == 'error' %}fa-exclamation-circle{% else %}fa-check-circle{% endif %}"></i>
+                        {{ message }}
+                        <button class="close-flash" onclick="this.parentElement.remove()">&times;</button>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+    
+    <a href="/" class="back-btn" aria-label="Back to upload page">
+        <i class="fas fa-arrow-left"></i> Back to Upload
+    </a>
+    
+    <div class="chat-container">
+        <div class="step-indicator">
+            <span class="step"><i class="fas fa-upload"></i></span>
+            <span class="step"><i class="fas fa-file-alt"></i></span>
+            <span class="step active"><i class="fas fa-comments"></i></span>
+        </div>
+        <h1 class="chat-title">Ask a question about the video</h1>
+        
+        <!-- Transcript Section -->
+        <div class="transcript-container">
+            <div class="transcript-header">
+                <h2>Transcript</h2>
+                <div class="transcript-info">
+                    <span>File: {{ filename }}</span>
+                    <span>{{ "{:,}".format(transcript_length) }} characters</span>
+                </div>
+            </div>
+            <div class="transcript" id="transcript">{{ transcript }}</div>
+        </div>
+        
+        <!-- Suggestion Bar -->
+        <div class="suggestion-bar">
+            <div class="suggestion-header">
+                <i class="fas fa-lightbulb"></i>
+                <span>Quick Questions:</span>
+            </div>
+            <div class="suggestion-tags">
+                <button class="suggestion-tag" onclick="setSuggestion('What is the main topic of the video?')">
+                    <i class="fas fa-question-circle"></i> Main Topic
+                </button>
+                <button class="suggestion-tag" onclick="setSuggestion('Who are the participants?')">
+                    <i class="fas fa-users"></i> Participants
+                </button>
+                <button class="suggestion-tag" onclick="setSuggestion('What decisions were made?')">
+                    <i class="fas fa-clipboard-check"></i> Decisions
+                </button>
+                <button class="suggestion-tag" onclick="setSuggestion('What are the action items?')">
+                    <i class="fas fa-tasks"></i> Action Items
+                </button>
+                <button class="suggestion-tag" onclick="setSuggestion('Summarize the video in 3 bullet points.')">
+                    <i class="fas fa-file-alt"></i> Summary
+                </button>
+            </div>
+        </div>
+        
+        <!-- Input Row -->
+        <div class="input-row">
+            <div class="input-group">
+                <input 
+                    type="text" 
+                    id="question" 
+                    placeholder="Ask something about the video..." 
+                    maxlength="500" 
+                    autocomplete="off"
+                    aria-label="Ask a question about the video"
+                >
+                <div class="input-buttons">
+                    <button 
+                        class="send-btn" 
+                        id="send-btn"
+                        onclick="sendQuestion()"
+                        aria-label="Send question"
+                    >
+                        <span class="btn-text">Send</span>
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                    <div class="divider"></div>
+                    <button 
+                        class="action-btn" 
+                        onclick="generatePDF()" 
+                        title="Download Transcript as PDF"
+                        aria-label="Download PDF"
+                    >
+                        <i class="fas fa-file-pdf"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="char-counter">
+                <span id="char-count">0</span>/500
+            </div>
+        </div>
+        
+        <!-- PDF Title Modal -->
+        <div id="pdf-title-modal" class="modal">
+            <div class="modal-content">
+                <h3>Enter Document Title</h3>
+                <input type="text" id="pdf-title" placeholder="Enter title for the PDF" value="{{ filename }} Transcript">
+                <div class="modal-buttons">
+                    <button onclick="document.getElementById('pdf-title-modal').style.display='none'">Cancel</button>
+                    <button onclick="confirmPDF()" class="primary">Generate PDF</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Loading State -->
+        <div id="loading" class="loading-state" style="display:none;">
+            <div class="loading-spinner"></div>
+            <p class="loading-text">Analyzing your question...</p>
+        </div>
+        
+        <!-- Response Card -->
+        <div class="response-card animated fade-in" id="response-card" style="display:none;">
+            <div class="response-header">
+                <div class="qa-label">
+                    <i class="fas fa-robot"></i>
+                    <span>AI Response</span>
+                </div>
+                <div class="response-actions">
+                    <button class="icon-btn" onclick="copyResponse()" title="Copy to clipboard">
+                        <i class="far fa-copy"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="response-content">
+                <div id="response-question" class="qa-question"></div>
+                <div id="response-answer" class="qa-answer"></div>
+            </div>
+            <div class="response-footer">
+                <span class="timestamp" id="response-time"></span>
+            </div>
+        </div>
+        
+        <!-- Empty State -->
+        <div id="empty-state" class="empty-state">
+            <div class="empty-icon">
+                <i class="fas fa-comment-dots"></i>
+            </div>
+            <h3>Ask a question about your video</h3>
+            <p>Try asking about the content, participants, or key points from the video.</p>
+        </div>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script>
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            // Focus the input field on page load
+            const questionInput = document.getElementById('question');
+            if (questionInput) {
+                questionInput.focus();
+                
+                // Character counter
+                questionInput.addEventListener('input', function() {
+                    document.getElementById('char-count').textContent = this.value.length;
+                });
+                
+                // Handle Enter key to submit
+                questionInput.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        sendQuestion();
+                    }
+                });
+            }
+            
+            // Initialize tooltips
+            const tooltips = document.querySelectorAll('[title]');
+            tooltips.forEach(tooltip => {
+                tooltip.setAttribute('data-tooltip', tooltip.getAttribute('title'));
+                tooltip.addEventListener('mouseenter', showTooltip);
+                tooltip.addEventListener('mouseleave', hideTooltip);
+            });
+        });
+        
+        // Tooltip functions
+        function showTooltip(e) {
+            const tooltip = document.createElement('div');
+            tooltip.className = 'tooltip';
+            tooltip.textContent = this.getAttribute('title');
+            document.body.appendChild(tooltip);
+            
+            const rect = this.getBoundingClientRect();
+            tooltip.style.top = `${rect.top - tooltip.offsetHeight - 10}px`;
+            tooltip.style.left = `${rect.left + (this.offsetWidth / 2) - (tooltip.offsetWidth / 2)}px`;
+            
+            this.tooltip = tooltip;
+        }
+        
+        function hideTooltip() {
+            if (this.tooltip) {
+                this.tooltip.remove();
+                this.tooltip = null;
+            }
+        }
+        // Set suggestion in the input field
+        function setSuggestion(text) {
+            const questionInput = document.getElementById('question');
+            questionInput.value = text;
+            questionInput.focus();
+            // Update character counter
+            document.getElementById('char-count').textContent = text.length;
+            // Add a subtle animation to the input
+            questionInput.classList.add('pulse');
+            setTimeout(() => questionInput.classList.remove('pulse'), 300);
+        }
+        
+        // Handle Enter key in question input
+        document.getElementById('question').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendQuestion();
+            }
+        });
+        
+        // Send question to the server
+        function sendQuestion() {
+            const questionInput = document.getElementById('question');
+            const question = questionInput.value.trim();
+            
+            if (!question) {
+                showToast('Please enter a question', 'error');
+                questionInput.focus();
+                return;
+            }
+            
+            const loading = document.getElementById('loading');
+            const responseCard = document.getElementById('response-card');
+            const responseQuestion = document.getElementById('response-question');
+            const responseAnswer = document.getElementById('response-answer');
+            const emptyState = document.getElementById('empty-state');
+            const sendBtn = document.getElementById('send-btn');
+            
+            // Show loading state
+            loading.style.display = 'flex';
+            responseCard.style.display = 'none';
+            emptyState.style.display = 'none';
+            
+            // Disable input and button during request
+            questionInput.disabled = true;
+            sendBtn.disabled = true;
+            sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            
+            // Start timing the response
+            const startTime = Date.now();
+            
+            // Send request to server
+            fetch('/ask', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: `question=${encodeURIComponent(question)}`
+            })
+            .then(async response => {
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.error || `Server returned ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                // Calculate response time
+                const responseTime = ((Date.now() - startTime) / 1000).toFixed(1);
+                
+                // Update UI with response
+                responseQuestion.textContent = question;
+                responseAnswer.innerHTML = formatResponse(data.answer);
+                document.getElementById('response-time').textContent = `Generated in ${responseTime}s`;
+                
+                // Show the response card
+                responseCard.style.display = 'block';
+                
+                // Hide empty state
+                emptyState.style.display = 'none';
+                
+                // Clear input but keep focus
+                questionInput.value = '';
+                questionInput.focus();
+                document.getElementById('char-count').textContent = '0';
+                
+                // Scroll to response
+                setTimeout(() => {
+                    responseCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }, 100);
+                
+                // Log the interaction
+                console.log(`Question answered in ${responseTime}s`);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showToast(error.message || 'An error occurred while processing your question.', 'error');
+                emptyState.style.display = 'flex';
+            })
+            .finally(() => {
+                loading.style.display = 'none';
+                questionInput.disabled = false;
+                sendBtn.disabled = false;
+                sendBtn.innerHTML = '<span class="btn-text">Send</span><i class="fas fa-paper-plane"></i>';
+            });
+            
+            // Format response with markdown-like formatting
+            function formatResponse(text) {
+                if (!text) return '';
+                
+                // Handle bullet points
+                text = text.replace(/^\s*[-*]\s+/gm, '• ');
+                
+                // Handle bold text
+                text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                
+                // Handle italic text
+                text = text.replace(/\*(.*?)\*/g, '<em>$1</em>');
+                
+                // Handle line breaks
+                text = text.replace(/\n/g, '<br>');
+                
+                // Handle code blocks
+                text = text.replace(/```(\w*)\n([\s\S]*?)\n```/g, 
+                    '<pre><code class="language-$1">$2</code></pre>');
+                
+                // Handle inline code
+                text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
+                
+                return text;
+            }
+        }
+        
+        // Copy response to clipboard
+        async function copyResponse() {
+            const responseText = document.getElementById('response-answer').textContent;
+            try {
+                await navigator.clipboard.writeText(responseText);
+                showToast('Response copied to clipboard!', 'success');
+            } catch (err) {
+                console.error('Failed to copy text: ', err);
+                showToast('Failed to copy response', 'error');
+            }
+        }
+        
+        // PDF Generation
+        function generatePDF() {
+            const modal = document.getElementById('pdf-title-modal');
+            const titleInput = document.getElementById('pdf-title');
+            
+            // Reset and show modal
+            const defaultTitle = '{{ filename }}' ? '{{ filename }} Transcript' : 'Meeting Transcript';
+            titleInput.value = defaultTitle;
+            modal.style.display = 'flex';
+            
+            // Focus the input
+            setTimeout(() => titleInput.focus(), 100);
+            
+            // Close modal when clicking outside
+            modal.onclick = function(e) {
+                if (e.target === modal) {
+                    modal.style.display = 'none';
+                }
+            };
+            
+            // Handle Escape key
+            function onEsc(e) {
+                if (e.key === 'Escape') {
+                    modal.style.display = 'none';
+                    document.removeEventListener('keydown', onEsc);
+                }
+            }
+            
+            document.addEventListener('keydown', onEsc);
+        }
+        
+        // Make generatePDF available globally
+        window.generatePDF = generatePDF;
+        
+        async function confirmPDF() {
+            const titleInput = document.getElementById('pdf-title');
+            const title = titleInput.value.trim() || 'Meeting Transcript';
+            const modal = document.getElementById('pdf-title-modal');
+            
+            // Validate title
+            if (!title) {
+                showToast('Please enter a title for the PDF', 'error');
+                titleInput.focus();
+                return;
+            }
+            
+            // Close modal and show loading state
+            modal.style.display = 'none';
+            
+            const pdfBtn = document.querySelector('.action-btn');
+            const originalHTML = pdfBtn.innerHTML;
+            
+            // Update button state
+            pdfBtn.disabled = true;
+            pdfBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            
+            // Show toast notification
+            const toastId = showToast('Generating PDF...', 'info', 0);
+            
+            try {
+                // Create form data
+                const formData = new FormData();
+                formData.append('title', title);
+                
+                console.log('Starting PDF generation with title:', title);
+                
+                const response = await fetch('/generate_pdf', {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        'Accept': 'application/json, application/pdf',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                });
+                
+                console.log('Response status:', response.status);
+                
+                // Check if response is JSON (error) or PDF (success)
+                const contentType = response.headers.get('content-type');
+                
+                if (contentType && contentType.includes('application/json')) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'Failed to generate PDF. Please try again.');
+                }
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                // Get the PDF blob
+                const blob = await response.blob();
+                
+                if (!blob || blob.size === 0) {
+                    throw new Error('Received empty PDF from server');
+                }
+                
+                console.log('PDF blob received, size:', blob.size, 'bytes');
+                
+                // Create a download link
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                
+                // Try to get filename from content-disposition header
+                const contentDisposition = response.headers.get('content-disposition');
+                let filename = `transcript_${new Date().toISOString().slice(0, 10)}.pdf`;
+                
+                if (contentDisposition) {
+                    const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+                    if (filenameMatch && filenameMatch[1]) {
+                        filename = filenameMatch[1].replace(/['"]/g, '');
+                    }
+                }
+                
+                // Set download attributes and trigger download
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                
+                // Cleanup
+                window.URL.revokeObjectURL(url);
+                a.remove();
+                
+                // Show success message
+                showToast('PDF generated successfully!', 'success');
+                
+            } catch (error) {
+                console.error('Error generating PDF:', error);
+                showToast(error.message || 'Failed to generate PDF', 'error');
+            } finally {
+                // Restore button state
+                pdfBtn.disabled = false;
+                pdfBtn.innerHTML = originalHTML;
+                
+                // Hide the loading toast
+                const toast = document.getElementById(`toast-${toastId}`);
+                if (toast) {
+                    toast.remove();
+                }
+            }
+        }
+    </script>
+{% endblock %}

@@ -1,64 +1,73 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Ask a question</title>
-    <script>
-    </script>
-</head>
-<body>
+{% extends "base.html" %}
+
+{% block content %}
     <a href="/" class="back-btn" aria-label="Back to upload page">&#8592; Back</a>
-    <div class="chat-container">
-        <div class="step-indicator">
-            <span class="step">1</span>
-            <span class="step">2</span>
-            <span class="step active">3</span>
-        </div>
-        <h1 class="chat-title">Ask a question about the video</h1>
-        <div class="suggestion-bar">
-            <b>Suggestions:</b>
-            <span class="suggestion" onclick="setSuggestion('What is the main topic of the video?')">Main topic</span> |
-            <span class="suggestion" onclick="setSuggestion('Who are the participants?')">Participants</span> |
-            <span class="suggestion" onclick="setSuggestion('What decisions were made?')">Decisions</span> |
-            <span class="suggestion" onclick="setSuggestion('What are the action items?')">Action items</span> |
-            <span class="suggestion" onclick="setSuggestion('Summarize the video.')">Summary</span> |
-            <span class="suggestion" onclick="setSuggestion('List all names mentioned in the transcript.')">List names</span> |
-            <span class="suggestion" onclick="setSuggestion('Extract all dates or times mentioned.')">Extract dates/times</span> |
-            <span class="suggestion" onclick="setSuggestion('What was the most important quote?')">Important quote</span> |
-            <span class="suggestion" onclick="setSuggestion('What is the overall sentiment of the discussion?')">Sentiment</span> |
-            <span class="suggestion" onclick="setSuggestion('Summarize the first half of the video.')">First half summary</span> |
-            <span class="suggestion" onclick="setSuggestion('Summarize the second half of the video.')">Second half summary</span> |
-            <span class="suggestion" onclick="setSuggestion('What are the next steps discussed?')">Next steps</span> |
-            <span class="suggestion" onclick="setSuggestion('Who asked the most questions?')">Most questions</span> |
-            <span class="suggestion" onclick="setSuggestion('What problems or challenges were discussed?')">Problems/challenges</span> |
-            <span class="suggestion" onclick="setSuggestion('What recommendations were given?')">Recommendations</span>
-        </div>
-        <div class="input-row">
-            <input type="text" id="question" placeholder="Type your question..." maxlength="200" autocomplete="off">
-            <button class="send-btn" onclick="sendQuestion()">Send</button>
-            <button class="pdf-btn" onclick="generatePDF()" title="Download Transcript as PDF">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                    <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
-                    <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
-                </svg>
-                PDF
-            </button>
-        </div>
-        <div id="pdf-title-modal" class="modal">
-            <div class="modal-content">
-                <h3>Enter Document Title</h3>
-                <input type="text" id="pdf-title" placeholder="Enter title for the PDF" value="Meeting Transcript">
-                <div class="modal-buttons">
-                    <button onclick="document.getElementById('pdf-title-modal').style.display='none'">Cancel</button>
-                    <button onclick="confirmPDF()" class="primary">Generate PDF</button>
+    <div class="container">
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <h1>Video Transcriber</h1>
+        <div class="chat-container">
+            <div class="step-indicator">
+                <span class="step">1</span>
+                <span class="step">2</span>
+                <span class="step active">3</span>
+            </div>
+            <h1 class="chat-title">Ask a question about the video</h1>
+            <div class="suggestion-bar">
+                <b>Suggestions:</b>
+                <span class="suggestion" onclick="setSuggestion('What is the main topic of the video?')">Main topic</span> |
+                <span class="suggestion" onclick="setSuggestion('Who are the participants?')">Participants</span> |
+                <span class="suggestion" onclick="setSuggestion('What decisions were made?')">Decisions</span> |
+                <span class="suggestion" onclick="setSuggestion('What are the action items?')">Action items</span> |
+                <span class="suggestion" onclick="setSuggestion('Summarize the video.')">Summary</span> |
+                <span class="suggestion" onclick="setSuggestion('List all names mentioned in the transcript.')">List names</span> |
+                <span class="suggestion" onclick="setSuggestion('Extract all dates or times mentioned.')">Extract dates/times</span> |
+                <span class="suggestion" onclick="setSuggestion('What was the most important quote?')">Important quote</span> |
+                <span class="suggestion" onclick="setSuggestion('What is the overall sentiment of the discussion?')">Sentiment</span> |
+                <span class="suggestion" onclick="setSuggestion('Summarize the first half of the video.')">First half summary</span> |
+                <span class="suggestion" onclick="setSuggestion('Summarize the second half of the video.')">Second half summary</span> |
+                <span class="suggestion" onclick="setSuggestion('What are the next steps discussed?')">Next steps</span> |
+                <span class="suggestion" onclick="setSuggestion('Who asked the most questions?')">Most questions</span> |
+                <span class="suggestion" onclick="setSuggestion('What problems or challenges were discussed?')">Problems/challenges</span> |
+                <span class="suggestion" onclick="setSuggestion('What recommendations were given?')">Recommendations</span>
+            </div>
+            <div class="input-row">
+                <input type="text" id="question" placeholder="Type your question..." maxlength="200" autocomplete="off">
+                <button class="send-btn" onclick="sendQuestion()">Send</button>
+                <button class="pdf-btn" onclick="generatePDF()" title="Download Transcript as PDF">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                        <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+                        <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
+                    </svg>
+                    PDF
+                </button>
+            </div>
+            <div id="pdf-title-modal" class="modal">
+                <div class="modal-content">
+                    <h3>Enter Document Title</h3>
+                    <input type="text" id="pdf-title" placeholder="Enter title for the PDF" value="Meeting Transcript">
+                    <div class="modal-buttons">
+                        <button onclick="document.getElementById('pdf-title-modal').style.display='none'">Cancel</button>
+                        <button onclick="confirmPDF()" class="primary">Generate PDF</button>
+                    </div>
                 </div>
             </div>
-        </div>
-        <div id="loading" class="loading-spinner" style="display:none;"></div>
-        <div id="toast" class="toast"></div>
-        <div class="response-card animated" id="response-card" style="display:none;">
-            <div class="qa-label">Response</div>
-            <div id="response-question" class="qa-question"></div>
-            <div id="response-answer" class="qa-answer"></div>
+            <div id="loading" class="loading-spinner" style="display:none;"></div>
+            <div id="toast" class="toast"></div>
+            <div class="response-card animated" id="response-card" style="display:none;">
+                <div class="qa-label">Response</div>
+                <div id="response-question" class="qa-question"></div>
+                <div id="response-answer" class="qa-answer"></div>
+            </div>
         </div>
     </div>
     <script>
@@ -223,11 +232,21 @@
             const question = document.getElementById('response-question').innerText;
             const answer = document.getElementById('response-answer').innerText;
             const pdfContent = `
-                <h1>Chat Transcript</h1>
-                <h2>Question</h2>
-                <p>${question}</p>
-                <h2>Answer</h2>
-                <p>${answer}</p>
+                <div class="transcript-container">
+                <div class="transcript-header">
+                    <h2>Transcript</h2>
+                    <div class="transcript-info">
+                        <span>File: {{ filename }}</span>
+                        <span>{{ "{:,}".format(transcript_length) }} characters</span>
+                    </div>
+                </div>
+                <div class="transcript" id="transcript">{{ transcript }}</div>
+            </div>
+            <h1>Chat Transcript</h1>
+            <h2>Question</h2>
+            <p>${question}</p>
+            <h2>Answer</h2>
+            <p>${answer}</p>
             `;
             const pdf = new jsPDF();
             pdf.fromHTML(pdfContent);

@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, session, redirect, url_for, jsonify, send_from_directory
+from flask import Flask, render_template, request, session, redirect, url_for, jsonify, send_from_directory, flash
 import re
 from werkzeug.utils import secure_filename
 import os
@@ -55,9 +55,21 @@ def diagnose_lm_studio_connection():
 
 
 app = Flask(__name__)
-app.secret_key = "my-dev-secret-key-123"
-UPLOAD_FOLDER = 'uploads'
+# Use a secure secret key in production
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-key-123')
+
+# Configure session
+app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-key-123')
+app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 hour
+app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max file size
+
+
+# Ensure upload folder exists
+UPLOAD_FOLDER = app.config['UPLOAD_FOLDER']
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# Using Flask's built-in session
 
 model = whisper.load_model("base")
 
@@ -89,192 +101,285 @@ def has_audio_stream(filepath):
         print(f"Error checking audio stream: {e}")
         return False
 
-@app.route("/transcribe", methods=["POST"])
+
+@app.route('/transcribe', methods=['POST'])
 def transcribe():
-    if "file" not in request.files:
-        return "No file uploaded", 400
+    print("\n=== Starting Transcription ===")
+    print(f"Request form: {request.form}")
+    print(f"Request files: {request.files}")
     
-    file = request.files["file"]
-    mode = request.form.get("mode", "script")
+    if 'file' not in request.files:
+        error_msg = 'No file part in request'
+        print(f"Error: {error_msg}")
+        flash(error_msg, 'error')
+        return redirect(request.referrer or url_for('index'))
     
-    if file.filename == "":
-        return "No selected file", 400
-    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+
+    if not file:
+        return jsonify({'error': 'No file provided'}), 400
+        
     filename = secure_filename(file.filename)
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
-    file.save(filepath)
-    
-    # Check if file has audio stream
-    if not has_audio_stream(filepath):
-        return "Error: The selected video file does not contain any audio stream. Please upload a video with audio.", 400
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     
     try:
+        file.save(filepath)
+        
+        # Check if file has audio
+        if not has_audio_stream(filepath):
+            os.remove(filepath)  # Clean up the file
+            return jsonify({'error': 'The uploaded file does not contain an audio stream'}), 400
+
+        # Transcribe the audio
         result = model.transcribe(filepath)
-        full_transcript = result["text"]
-        session["transcript"] = full_transcript
-        session["mode"] = mode
-        return redirect(url_for("chat"))
+        transcript = result["text"]
+        
+        # Instead of storing in session, save to a file and store the filename
+        transcript_filename = f"transcript_{int(datetime.now().timestamp())}.txt"
+        transcript_path = os.path.join('transcripts', transcript_filename)
+        
+        # Ensure transcripts directory exists
+        os.makedirs('transcripts', exist_ok=True)
+        
+        # Save transcript to file
+        with open(transcript_path, 'w', encoding='utf-8') as f:
+            f.write(transcript)
+        
+        # Store only the filename in session
+        session['transcript_file'] = transcript_filename
+        session['filename'] = os.path.splitext(filename)[0]  # Save filename without extension
+        session['transcript_length'] = len(transcript)
+        session.modified = True  # Ensure session is saved
+        
+        # Debug output
+        print("\n=== SESSION DATA SAVED ===")
+        print(f"Transcript length: {len(transcript)} characters")
+        print(f"Session keys: {list(session.keys())}")
+        print("=========================\n")
+        
+        # Clean up the temporary file
+        try:
+            os.remove(filepath)
+            print("Temporary file cleaned up")
+        except Exception as e:
+            print(f"Warning: Could not delete temporary file: {str(e)}")
+        
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({
+                'status': 'success',
+                'redirect': url_for('chat')
+            })
+        return redirect(url_for('chat'))
+            
     except Exception as e:
-        return f"Error during transcription: {str(e)}", 500
+        import traceback
+        error_msg = f'Error: {str(e)}'
+        print(f"\n=== ERROR ===")
+        print(error_msg)
+        print("\nStack Trace:")
+        print(traceback.format_exc())
+        print("=============\n")
+        
+        # Clean up if file exists
+        if 'filepath' in locals() and os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+                print("Cleaned up temporary file after error")
+            except Exception as cleanup_error:
+                print(f"Error during cleanup: {str(cleanup_error)}")
+        
+        flash(f'Error processing file: {str(e)}', 'error')
+        
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({
+                'status': 'error',
+                'message': error_msg
+            }), 500
+            
+        return redirect(request.referrer or url_for('index'))
 
 
 @app.route("/generate_pdf", methods=["POST"])
 def generate_pdf():
-    """Generate a PDF from the transcript in the session with content analysis."""
+    """Generate a PDF from the transcript file with content analysis."""
     print("\n=== Starting PDF Generation ===")
     
-    if 'transcript' not in session or not session['transcript']:
-        error_msg = "No transcript available to generate PDF"
+    if 'transcript_file' not in session or not session['transcript_file']:
+        error_msg = "No transcript file found. Please upload a file first."
         print(f"Error: {error_msg}")
-        return jsonify({"error": error_msg}), 400
+        flash(error_msg, 'error')
+        return redirect(url_for('index'))
     
-    temp_path = None
     try:
-        # Create a temporary file for the PDF
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
-            temp_path = temp_file.name
-        print(f"Temporary PDF file created at: {temp_path}")
+        # Load transcript from file
+        transcript_path = os.path.join('transcripts', session['transcript_file'])
+        if not os.path.exists(transcript_path):
+            error_msg = "Transcript file not found. Please upload the file again."
+            print(f"Error: {error_msg}")
+            flash(error_msg, 'error')
+            return redirect(url_for('index'))
+            
+        with open(transcript_path, 'r', encoding='utf-8') as f:
+            transcript = f.read()
         
         # Get custom title or use default
         custom_title = request.form.get('title', 'Meeting Transcript')
-        print(f"Using title: {custom_title}")
-        
-        # Print transcript preview for debugging
-        transcript_preview = session['transcript'][:100] + '...' if len(session['transcript']) > 100 else session['transcript']
-        print(f"Transcript preview: {transcript_preview}")
-        
-        # Ensure transcript is a string
-        transcript_text = str(session['transcript'])
-        
-        # Generate the PDF with content analysis
-        print("Starting PDF generation...")
-        output_path = create_pdf(
-            transcript_text=transcript_text,
-            output_filename=temp_path,
-            title=custom_title,
-            analyze_content=True  # Enable content analysis
-        )
-        print(f"PDF generated at: {output_path}")
-        
-        # Verify the file was created
-        if not os.path.exists(output_path):
-            raise FileNotFoundError(f"PDF file was not created at {output_path}")
-        
-        # Read the generated PDF
-        with open(output_path, 'rb') as f:
-            pdf_data = f.read()
-        
-        if not pdf_data:
-            raise ValueError("Generated PDF is empty")
-            
-        print(f"PDF size: {len(pdf_data)} bytes")
-        
-        # Clean up the temporary file
-        try:
-            os.unlink(output_path)
-            print("Temporary PDF file cleaned up")
-        except Exception as e:
-            print(f"Warning: Could not delete temporary file: {str(e)}")
-        
-        # Create response with PDF data
-        from flask import make_response
-        response = make_response(pdf_data)
-        response.headers['Content-Type'] = 'application/pdf'
         safe_title = re.sub(r'[^\w\s-]', '', custom_title).strip().replace(' ', '_')
-        filename = f"{safe_title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-        response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
         
-        print("PDF generation completed successfully!")
-        return response
+        # Create a safe filename with timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        output_filename = f"{safe_title}_{timestamp}.pdf"
+        output_path = os.path.abspath(os.path.join('output', output_filename))
+        
+        # Ensure output directory exists
+        os.makedirs('output', exist_ok=True)
+        
+        print(f"Generating PDF with title: {custom_title}")
+        print(f"Transcript length: {len(transcript)} characters")
+        print(f"Output path: {output_path}")
+        
+        # Generate the PDF
+        from transcript_to_pdf import create_pdf
+        
+        try:
+            pdf_path = create_pdf(
+                transcript_text=transcript,
+                output_filename=output_path,
+                title=custom_title,
+                analyze_content=True
+            )
+            
+            print(f"PDF generated at: {pdf_path}")
+            
+            # Verify the file was created
+            if not os.path.exists(pdf_path):
+                raise FileNotFoundError(f"Failed to generate PDF file at {pdf_path}")
+            
+            # Get the relative path for send_from_directory
+            output_dir = os.path.abspath('output')
+            if not output_path.startswith(output_dir):
+                raise ValueError(f"Invalid output path: {output_path}")
+                
+            rel_path = os.path.relpath(pdf_path, output_dir)
+            
+            # Send the file for download
+            return send_from_directory(
+                directory=output_dir,
+                path=os.path.basename(rel_path),
+                as_attachment=True,
+                download_name=f"{safe_title}.pdf"
+            )
+            
+        except Exception as e:
+            error_msg = f"Error in PDF generation: {str(e)}"
+            print(f"\n=== PDF GENERATION ERROR ===\n{error_msg}\n")
+            import traceback
+            traceback.print_exc()
+            print("==============================\n")
+            raise
         
     except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
         error_msg = f"Error generating PDF: {str(e)}"
-        print("\n=== ERROR DETAILS ===")
-        print(error_msg)
-        print("\nStack Trace:")
-        print(error_details)
-        print("====================\n")
+        print(f"\n=== ERROR ===\n{error_msg}\n")
+        import traceback
+        traceback.print_exc()
+        print("=============\n")
+                
+        flash('Failed to generate PDF. Please try again.', 'error')
+        return redirect(url_for('index'))
+
+@app.route('/chat')
+def chat():
+    # Debug: Print all session keys
+    print("\n=== Chat Route ===")
+    print("Session keys:", list(session.keys()))
+    
+    # Check if transcript file exists in session
+    if 'transcript_file' not in session or not session['transcript_file']:
+        print("No transcript file found in session. Redirecting to home.")
+        flash('No transcript found. Please upload a file first.', 'error')
+        return redirect(url_for('index'))
+    
+    try:
+        # Load transcript from file
+        transcript_path = os.path.join('transcripts', session['transcript_file'])
+        if not os.path.exists(transcript_path):
+            flash('Transcript file not found. Please upload the file again.', 'error')
+            return redirect(url_for('index'))
+            
+        with open(transcript_path, 'r', encoding='utf-8') as f:
+            transcript = f.read()
+            
+        # Get action points if they exist
+        action_points = session.get('action_points', '')
         
-        # Clean up the temporary file if it exists
-        if temp_path and os.path.exists(temp_path):
-            try:
-                os.unlink(temp_path)
-                print("Cleaned up temporary file after error")
-            except Exception as cleanup_error:
-                print(f"Error cleaning up temp file: {str(cleanup_error)}")
+        # Get suggestions
+        suggestions = [
+            "Summarize the key points",
+            "What are the main topics discussed?",
+            "Extract action items",
+            "What decisions were made?"
+        ]
         
+        return render_template('chat_new.html', 
+                             transcript=transcript, 
+                             action_points=action_points,
+                             suggestions=suggestions,
+                             filename=session.get('filename', 'Untitled'),
+                             transcript_length=session.get('transcript_length', 0))
+                             
+    except Exception as e:
+        print(f"Error loading transcript: {str(e)}")
+        flash('Error loading transcript. Please try again.', 'error')
+        return redirect(url_for('index'))
+
+@app.route('/ask', methods=['POST'])
+def ask_question():
+    # Check if we have a transcript file reference in session
+    if 'transcript_file' not in session:
+        return jsonify({'error': 'No transcript found. Please upload a file first.'}), 400
+
+    try:
+        # Load the transcript from file
+        transcript_path = os.path.join('transcripts', session['transcript_file'])
+        if not os.path.exists(transcript_path):
+            return jsonify({'error': 'Transcript file not found. Please upload the file again.'}), 404
+
+        with open(transcript_path, 'r', encoding='utf-8') as f:
+            transcript = f.read()
+
+        data = request.get_json()
+        question = data.get('question', '').strip()
+
+        if not question:
+            return jsonify({'error': 'No question provided'}), 400
+
+        # Here you would typically send the question and transcript to your LLM
+        # For now, we'll just return a simple response
+        response = (
+            f"You asked: {question}\n\n"
+            f"This is a placeholder response based on a transcript of "
+            f"{len(transcript)} characters. In a real implementation, this would be "
+            "the AI's response based on the transcript content."
+        )
+
         return jsonify({
-            "error": "Failed to generate PDF. Please check the server logs for details.",
-            "details": str(e)
+            'success': True,
+            'response': response
+        })
+
+    except json.JSONDecodeError:
+        return jsonify({'error': 'Invalid JSON data'}), 400
+    except Exception as e:
+        print(f"Error in ask_question: {str(e)}")
+        return jsonify({
+            'error': f'Error processing question: {str(e)}'
         }), 500
 
-@app.route("/chat", methods=["GET", "POST"])
-def chat():
-    if request.args.get('diagnose') == 'true':
-        diagnostics = diagnose_lm_studio_connection()
-        return jsonify(diagnostics)
-
-    if request.method == 'POST':
-        prompt = request.form.get('prompt', '')
-        if not prompt:
-            return jsonify({"response": "No prompt provided."})
-
-        import sys
-        print(f"Received prompt: {prompt}", file=sys.stderr)
-
-        lmstudio_url = "http://192.168.0.101:1234/v1/completions"
-        headers = {"Content-Type": "application/json"}
-
-        payload = {
-            "model": "meta-llama-3.1-8b-instruct",
-            "prompt": prompt,
-            "max_tokens": 512,
-            "temperature": 0.7
-        }
-
-        try:
-            # Diagnostic print to help troubleshoot connection
-            print(f"Attempting to connect to: {lmstudio_url}", file=sys.stderr)
-            print(f"Payload: {json.dumps(payload)}", file=sys.stderr)
-
-            response = requests.post(lmstudio_url, json=payload, headers=headers, timeout=50)
-            print(f"Response Status: {response.status_code}", file=sys.stderr)
-            print(f"Response Headers: {response.headers}", file=sys.stderr)
-            print(f"Response Text: {response.text[:500]}", file=sys.stderr)  # Limit text to first 500 chars
-
-            if response.status_code == 200:
-                try:
-                    response_json = response.json()
-
-                    # More robust JSON parsing
-                    answer = response_json.get("choices", [{}])[0].get("text", "").strip()
-
-                    if not answer:
-                        answer = "[No response content from model]"
-
-                    return jsonify({"response": answer})
-                except json.JSONDecodeError as je:
-                    print(f"JSON Decode Error: {je}", file=sys.stderr)
-                    return jsonify({"response": f"[JSON Parsing Error] {str(je)}"})
-
-            else:
-                return jsonify({"response": f"[LM Studio Error] {response.status_code}: {response.text[:200]}"})
-
-        except requests.ConnectionError as ce:
-            print(f"Connection Error: {ce}", file=sys.stderr)
-            return jsonify({"response": f"[Connection Error] Unable to reach LM Studio server. Check server status."})
-        except requests.Timeout as te:
-            print(f"Connection Timeout: {te}", file=sys.stderr)
-            return jsonify({"response": f"[Timeout Error] LM Studio server took too long to respond."})
-        except requests.RequestException as e:
-            print(f"Request Exception: {e}", file=sys.stderr)
-            return jsonify({"response": f"[Request Exception] {str(e)}"})
-
-    return render_template("chat.html")
-
-
-
+# Initialize upload folder and run the app
 if __name__ == "__main__":
-    app.run(debug=True)
+    if not os.path.exists(UPLOAD_FOLDER):
+        os.makedirs(UPLOAD_FOLDER)
+    app.run(debug=True, port=5000)
