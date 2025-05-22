@@ -67,22 +67,51 @@ def index():
     )
 
 
+def has_audio_stream(filepath):
+    """Check if the video file contains an audio stream using ffprobe."""
+    import subprocess
+    try:
+        cmd = [
+            'ffprobe',
+            '-v', 'error',
+            '-select_streams', 'a',
+            '-show_entries', 'stream=codec_type',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            filepath
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        return 'audio' in result.stdout.lower()
+    except Exception as e:
+        print(f"Error checking audio stream: {e}")
+        return False
+
 @app.route("/transcribe", methods=["POST"])
 def transcribe():
     if "file" not in request.files:
         return "No file uploaded", 400
+    
     file = request.files["file"]
     mode = request.form.get("mode", "script")
+    
     if file.filename == "":
         return "No selected file", 400
+    
     filename = secure_filename(file.filename)
     filepath = os.path.join(UPLOAD_FOLDER, filename)
     file.save(filepath)
-    result = model.transcribe(filepath)
-    full_transcript = result["text"]
-    session["transcript"] = full_transcript
-    session["mode"] = mode
-    return redirect(url_for("chat"))
+    
+    # Check if file has audio stream
+    if not has_audio_stream(filepath):
+        return "Error: The selected video file does not contain any audio stream. Please upload a video with audio.", 400
+    
+    try:
+        result = model.transcribe(filepath)
+        full_transcript = result["text"]
+        session["transcript"] = full_transcript
+        session["mode"] = mode
+        return redirect(url_for("chat"))
+    except Exception as e:
+        return f"Error during transcription: {str(e)}", 500
 
 
 @app.route("/chat", methods=["GET", "POST"])
